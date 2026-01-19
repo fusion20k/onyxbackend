@@ -4,6 +4,8 @@ const cors = require('cors');
 const errorHandler = require('./middleware/errorHandler');
 const inviteRoutes = require('./routes/invite');
 const authRoutes = require('./routes/auth');
+const adminRoutes = require('./routes/admin');
+const paymentRoutes = require('./routes/payment');
 
 const app = express();
 
@@ -20,6 +22,8 @@ app.get('/health', (req, res) => {
 
 app.use('/api/invite', inviteRoutes);
 app.use('/api/auth', authRoutes);
+app.use('/api/admin', adminRoutes);
+app.use('/api/payment', paymentRoutes);
 
 app.use(errorHandler);
 

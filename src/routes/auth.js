@@ -199,4 +199,40 @@ router.get('/me', async (req, res) => {
     }
 });
 
+router.get('/status', async (req, res) => {
+    try {
+        const authHeader = req.headers.authorization;
+        
+        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+            return res.json({ authenticated: false });
+        }
+
+        const token = authHeader.substring(7);
+
+        const { data: { user }, error } = await supabase.auth.getUser(token);
+
+        if (error || !user) {
+            return res.json({ authenticated: false });
+        }
+
+        const { data: userData, error: userError } = await supabase
+            .from('users')
+            .select('*')
+            .eq('id', user.id)
+            .single();
+
+        if (userError) {
+            return res.json({ authenticated: false });
+        }
+
+        res.json({
+            authenticated: true,
+            user: userData
+        });
+    } catch (error) {
+        console.error('Status check exception:', error);
+        res.json({ authenticated: false });
+    }
+});
+
 module.exports = router;
