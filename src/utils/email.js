@@ -1,6 +1,5 @@
 const { Resend } = require('resend');
 
-const resend = new Resend(process.env.RESEND_API_KEY);
 const fromEmail = process.env.FROM_EMAIL || 'noreply@onyx-project.com';
 
 async function sendInviteEmail(to, token, inviteUrl) {
@@ -10,6 +9,7 @@ async function sendInviteEmail(to, token, inviteUrl) {
             return { success: false, message: 'Email service not configured' };
         }
 
+        const resend = new Resend(process.env.RESEND_API_KEY);
         const { data, error } = await resend.emails.send({
             from: fromEmail,
             to: to,
@@ -44,6 +44,7 @@ async function sendWelcomeEmail(to, displayName) {
             return { success: false, message: 'Email service not configured' };
         }
 
+        const resend = new Resend(process.env.RESEND_API_KEY);
         const { data, error } = await resend.emails.send({
             from: fromEmail,
             to: to,
