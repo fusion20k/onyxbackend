@@ -170,4 +170,27 @@ router.post('/deny', authenticateToken, requireAdmin, async (req, res) => {
     }
 });
 
+router.delete('/clear-denied', authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const { error, count } = await supabase
+            .from('applications')
+            .delete()
+            .eq('status', 'denied');
+
+        if (error) {
+            console.error('Clear denied applications error:', error);
+            return res.status(500).json({ error: 'Failed to clear denied applications' });
+        }
+
+        res.json({
+            success: true,
+            message: 'Denied applications cleared',
+            count: count || 0
+        });
+    } catch (error) {
+        console.error('Clear denied applications exception:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 module.exports = router;
