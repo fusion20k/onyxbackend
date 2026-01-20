@@ -13,14 +13,14 @@ async function sendInviteEmail(to, token, inviteUrl) {
         const { data, error } = await resend.emails.send({
             from: fromEmail,
             to: to,
-            subject: 'Welcome to Onyx - Complete Your Registration',
+            subject: 'Onyx Platform - Registration Approved',
             html: `
-                <h2>Welcome to Onyx!</h2>
-                <p>You've been invited to join the Onyx platform.</p>
-                <p>Click the link below to complete your registration:</p>
-                <p><a href="${inviteUrl}?token=${token}">Complete Registration</a></p>
-                <p>This link will expire in 7 days.</p>
-                <p>If you didn't request this invitation, you can safely ignore this email.</p>
+                <h2>Welcome to the Onyx Project.</h2>
+                <p>Your application has been approved.</p>
+                <p>Complete your registration to gain access to the platform:</p>
+                <p><a href="${inviteUrl}">Complete Registration</a></p>
+                <p><strong>This link expires in 72 hours.</strong></p>
+                <p>Do not share this link.</p>
             `
         });
 
@@ -48,12 +48,11 @@ async function sendWelcomeEmail(to, displayName) {
         const { data, error } = await resend.emails.send({
             from: fromEmail,
             to: to,
-            subject: 'Welcome to Onyx!',
+            subject: 'Onyx Platform - Account Created',
             html: `
-                <h2>Welcome to Onyx, ${displayName || 'there'}!</h2>
-                <p>Your account has been successfully created.</p>
-                <p>You can now log in and start using the platform.</p>
-                <p>If you have any questions, feel free to reach out to our support team.</p>
+                <h2>Welcome to the Onyx Project.</h2>
+                <p>Your account is now active.</p>
+                <p>You have access to the platform.</p>
             `
         });
 
