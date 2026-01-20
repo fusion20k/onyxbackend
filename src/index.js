@@ -6,6 +6,7 @@ const inviteRoutes = require('./routes/invite');
 const authRoutes = require('./routes/auth');
 const adminRoutes = require('./routes/admin');
 const paymentRoutes = require('./routes/payment');
+const applicationsRoutes = require('./routes/applications');
 
 const app = express();
 
@@ -24,6 +25,7 @@ app.use('/api/invite', inviteRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/payment', paymentRoutes);
+app.use('/api/applications', applicationsRoutes);
 
 app.use(errorHandler);
 
