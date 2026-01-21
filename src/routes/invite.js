@@ -20,10 +20,6 @@ router.get('/validate-token', async (req, res) => {
             return res.status(404).json({ error: 'Invalid token' });
         }
 
-        if (data.used) {
-            return res.status(400).json({ error: 'Token already used' });
-        }
-
         if (new Date(data.expires_at) < new Date()) {
             return res.status(400).json({ error: 'Token expired' });
         }
