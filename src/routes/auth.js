@@ -24,15 +24,36 @@ router.post('/create-account', async (req, res) => {
                 return res.status(400).json({ error: 'Invalid token' });
             }
 
-            if (tokenData.used) {
-                return res.status(400).json({ error: 'Token already used' });
-            }
-
             if (new Date(tokenData.expires_at) < new Date()) {
                 return res.status(400).json({ error: 'Token expired' });
             }
 
             userEmail = tokenData.email;
+
+            const { data: existingUser } = await supabase.auth.admin.listUsers();
+            const userExists = existingUser?.users?.some(u => u.email === userEmail);
+
+            if (userExists) {
+                const { data: sessionData, error: sessionError } = await supabase.auth.signInWithPassword({
+                    email: userEmail,
+                    password: password
+                });
+
+                if (sessionError) {
+                    return res.status(401).json({ error: 'Account exists. Please check your password.' });
+                }
+
+                await supabase
+                    .from('invite_tokens')
+                    .update({ used: true })
+                    .eq('token', token);
+
+                return res.json({
+                    success: true,
+                    session: sessionData.session,
+                    user: sessionData.user
+                });
+            }
         } else {
             const { data: appData, error: appError } = await supabase
                 .from('applications')
