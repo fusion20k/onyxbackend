@@ -26,12 +26,8 @@ router.post('/submit', async (req, res) => {
             return res.status(400).json({ error: 'Reason must be between 10 and 1000 characters' });
         }
 
-        const validRoles = ['developer', 'designer', 'manager', 'founder', 'other'];
-        if (!validRoles.includes(role.toLowerCase())) {
-            return res.status(400).json({ 
-                error: 'Invalid role',
-                validRoles: validRoles
-            });
+        if (role.length < 2 || role.length > 50) {
+            return res.status(400).json({ error: 'Role must be between 2 and 50 characters' });
         }
 
         const { data: existingApp, error: checkError } = await supabase
