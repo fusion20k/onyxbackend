@@ -199,10 +199,7 @@ router.get('/decisions', authenticateToken, requireAdmin, async (req, res) => {
 
         let query = supabase
             .from('decisions')
-            .select(`
-                *,
-                user:users!decisions_user_id_fkey(id, email, display_name)
-            `);
+            .select('*');
 
         if (status) {
             query = query.eq('status', status);
@@ -221,7 +218,13 @@ router.get('/decisions', authenticateToken, requireAdmin, async (req, res) => {
             return res.status(500).json({ error: 'Failed to fetch decisions' });
         }
 
-        const decisionsWithCounts = await Promise.all(decisions.map(async (decision) => {
+        const decisionsWithDetails = await Promise.all(decisions.map(async (decision) => {
+            const { data: user } = await supabase
+                .from('users')
+                .select('id, email, display_name')
+                .eq('id', decision.user_id)
+                .single();
+
             const { count } = await supabase
                 .from('decision_feedback')
                 .select('*', { count: 'exact', head: true })
@@ -230,8 +233,8 @@ router.get('/decisions', authenticateToken, requireAdmin, async (req, res) => {
             return {
                 id: decision.id,
                 user_id: decision.user_id,
-                user_email: decision.user?.email,
-                user_name: decision.user?.display_name,
+                user_email: user?.email || 'Unknown',
+                user_name: user?.display_name || 'Unknown',
                 title: decision.title,
                 status: decision.status,
                 priority: decision.priority,
@@ -241,7 +244,7 @@ router.get('/decisions', authenticateToken, requireAdmin, async (req, res) => {
             };
         }));
 
-        res.json({ decisions: decisionsWithCounts });
+        res.json({ decisions: decisionsWithDetails });
     } catch (error) {
         console.error('Get decisions exception:', error);
         res.status(500).json({ error: 'Internal server error' });
