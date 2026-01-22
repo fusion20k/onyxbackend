@@ -7,6 +7,7 @@ const authRoutes = require('./routes/auth');
 const adminRoutes = require('./routes/admin');
 const paymentRoutes = require('./routes/payment');
 const applicationsRoutes = require('./routes/applications');
+const workspaceRoutes = require('./routes/workspace');
 
 const app = express();
 
@@ -26,6 +27,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/payment', paymentRoutes);
 app.use('/api/applications', applicationsRoutes);
+app.use('/api/workspace', workspaceRoutes);
 
 app.use(errorHandler);
 
