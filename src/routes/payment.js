@@ -71,7 +71,10 @@ router.post('/verify', authenticateToken, async (req, res) => {
 
         const { error: updateError } = await supabase
             .from('users')
-            .update({ paid: true })
+            .update({ 
+                paid: true,
+                stripe_customer_id: session.customer
+            })
             .eq('id', req.user.id);
 
         if (updateError) {
@@ -86,6 +89,34 @@ router.post('/verify', authenticateToken, async (req, res) => {
     } catch (error) {
         console.error('Verify payment error:', error);
         res.status(500).json({ error: 'Failed to verify payment' });
+    }
+});
+
+router.post('/customer-portal', authenticateToken, async (req, res) => {
+    try {
+        const { data: user, error: userError } = await supabase
+            .from('users')
+            .select('stripe_customer_id')
+            .eq('id', req.user.id)
+            .single();
+
+        if (userError || !user) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+
+        if (!user.stripe_customer_id) {
+            return res.status(400).json({ error: 'No payment history found' });
+        }
+
+        const portalSession = await stripe.billingPortal.sessions.create({
+            customer: user.stripe_customer_id,
+            return_url: `${process.env.FRONTEND_URL}/workspace`
+        });
+
+        res.json({ url: portalSession.url });
+    } catch (error) {
+        console.error('Customer portal error:', error);
+        res.status(500).json({ error: 'Failed to create customer portal session' });
     }
 });
 
