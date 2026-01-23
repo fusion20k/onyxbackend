@@ -1,10 +1,22 @@
 const OpenAI = require('openai');
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
-});
+let openai = null;
+
+function getOpenAIClient() {
+  if (!openai) {
+    if (!process.env.OPENAI_API_KEY) {
+      throw new Error('OPENAI_API_KEY environment variable is not set');
+    }
+    openai = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY
+    });
+  }
+  return openai;
+}
 
 async function extractUnderstanding(rawInput) {
+  const client = getOpenAIClient();
+  
   const prompt = `You are Onyx, a decision analysis system. Extract structured information from this decision context.
 
 User's input:
@@ -28,7 +40,7 @@ Extract and return a JSON object with:
 
 Be concise. If something is unclear, make a reasonable inference.`;
 
-  const response = await openai.chat.completions.create({
+  const response = await client.chat.completions.create({
     model: 'gpt-4o',
     messages: [
       { role: 'system', content: 'You are a precise decision analysis system. Always respond with valid JSON only.' },
@@ -43,6 +55,8 @@ Be concise. If something is unclear, make a reasonable inference.`;
 }
 
 async function runStressTests(decision, options) {
+  const client = getOpenAIClient();
+  
   const analysisPrompt = `You are Onyx, a decision stress-testing engine. Analyze these options under uncertainty.
 
 Decision: ${decision.title}
@@ -76,7 +90,7 @@ Fragility scoring:
 
 Perturb assumptions by ±30-50% to test resilience.`;
 
-  const response = await openai.chat.completions.create({
+  const response = await client.chat.completions.create({
     model: 'gpt-4o',
     messages: [
       { role: 'system', content: 'You are a rigorous decision analyst. Respond with valid JSON only.' },
@@ -91,6 +105,8 @@ Perturb assumptions by ±30-50% to test resilience.`;
 }
 
 async function generateRecommendation(decision, stressTestResults) {
+  const client = getOpenAIClient();
+  
   const recPrompt = `You are Onyx. Recommend the most robust option based on stress tests.
 
 Decision: ${decision.title}
@@ -109,7 +125,7 @@ Provide recommendation as JSON:
 
 Focus on: Which option stays viable across most scenarios, not just best-case.`;
 
-  const response = await openai.chat.completions.create({
+  const response = await client.chat.completions.create({
     model: 'gpt-4o',
     messages: [
       { role: 'system', content: 'You are a decision advisor prioritizing robustness over upside. Respond with valid JSON.' },
@@ -123,6 +139,8 @@ Focus on: Which option stays viable across most scenarios, not just best-case.`;
 }
 
 async function answerFollowup(decision, followupHistory, userQuestion) {
+  const client = getOpenAIClient();
+  
   const context = `Decision: ${decision.title}
 Goal: ${decision.goal}
 Options: ${decision.options?.map(o => o.name).join(', ')}
@@ -132,7 +150,7 @@ ${followupHistory.map(f => `${f.author_type}: ${f.content}`).join('\n')}
 
 User question: ${userQuestion}`;
 
-  const response = await openai.chat.completions.create({
+  const response = await client.chat.completions.create({
     model: 'gpt-4o',
     messages: [
       { role: 'system', content: 'You are Onyx. Answer briefly and directly. Focus on helping them commit to a robust decision.' },
