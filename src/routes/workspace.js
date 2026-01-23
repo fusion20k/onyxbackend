@@ -56,7 +56,7 @@ router.get('/active-conversation', authenticateToken, async (req, res) => {
     }
 });
 
-router.post('/start-conversation', authenticateToken, async (req, res) => {
+router.post('/start-conversation', authenticateToken, upload.single('file'), async (req, res) => {
     try {
         const { message } = req.body;
 
@@ -89,13 +89,41 @@ router.post('/start-conversation', authenticateToken, async (req, res) => {
             return res.status(500).json({ error: 'Failed to create conversation' });
         }
 
+        let attachmentUrl = null;
+        let attachmentName = null;
+
+        if (req.file) {
+            const fileName = `${req.user.id}/${Date.now()}_${req.file.originalname}`;
+            
+            const { data: uploadData, error: uploadError } = await supabase.storage
+                .from('message-attachments')
+                .upload(fileName, req.file.buffer, {
+                    contentType: req.file.mimetype,
+                    upsert: false
+                });
+
+            if (uploadError) {
+                console.error('File upload error:', uploadError);
+                return res.status(500).json({ error: 'Failed to upload file' });
+            }
+
+            const { data: urlData } = supabase.storage
+                .from('message-attachments')
+                .getPublicUrl(fileName);
+
+            attachmentUrl = urlData.publicUrl;
+            attachmentName = req.file.originalname;
+        }
+
         const { data: newMessage, error: msgError } = await supabase
             .from('messages')
             .insert({
                 conversation_id: newConversation.id,
                 author_id: req.user.id,
                 author_type: 'user',
-                content: message.trim()
+                content: message.trim(),
+                attachment_url: attachmentUrl,
+                attachment_name: attachmentName
             })
             .select()
             .single();
@@ -107,7 +135,8 @@ router.post('/start-conversation', authenticateToken, async (req, res) => {
 
         res.status(201).json({
             conversation_id: newConversation.id,
-            message_id: newMessage.id
+            message_id: newMessage.id,
+            attachment_url: attachmentUrl
         });
     } catch (error) {
         console.error('Start conversation exception:', error);
