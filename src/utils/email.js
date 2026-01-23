@@ -69,7 +69,40 @@ async function sendWelcomeEmail(to, displayName) {
     }
 }
 
+async function sendAdminResponseEmail(to, messagePreview) {
+    try {
+        if (!process.env.RESEND_API_KEY) {
+            console.warn('RESEND_API_KEY not configured. Skipping email send.');
+            return { success: false, message: 'Email service not configured' };
+        }
+
+        const resend = new Resend(process.env.RESEND_API_KEY);
+        const { data, error } = await resend.emails.send({
+            from: fromEmail,
+            to: to,
+            subject: 'Onyx Platform - New Response',
+            html: `
+                <h2>You have a new response from the Onyx team.</h2>
+                <p>${messagePreview}${messagePreview.length >= 100 ? '...' : ''}</p>
+                <p>Log in to your workspace to view the full message and continue the conversation.</p>
+            `
+        });
+
+        if (error) {
+            console.error('Admin response email send error:', error);
+            return { success: false, error };
+        }
+
+        console.log('Admin response email sent successfully:', data);
+        return { success: true, data };
+    } catch (error) {
+        console.error('Admin response email send exception:', error);
+        return { success: false, error: error.message };
+    }
+}
+
 module.exports = {
     sendInviteEmail,
-    sendWelcomeEmail
+    sendWelcomeEmail,
+    sendAdminResponseEmail
 };

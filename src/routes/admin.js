@@ -193,12 +193,12 @@ router.delete('/clear-denied', authenticateToken, requireAdmin, async (req, res)
     }
 });
 
-router.get('/decisions', authenticateToken, requireAdmin, async (req, res) => {
+router.get('/conversations', authenticateToken, requireAdmin, async (req, res) => {
     try {
         const { status, user_id } = req.query;
 
         let query = supabase
-            .from('decisions')
+            .from('conversations')
             .select('*');
 
         if (status) {
@@ -209,137 +209,187 @@ router.get('/decisions', authenticateToken, requireAdmin, async (req, res) => {
             query = query.eq('user_id', user_id);
         }
 
-        query = query.order('created_at', { ascending: false });
+        query = query.order('priority', { ascending: false }).order('created_at', { ascending: false });
 
-        const { data: decisions, error: decisionsError } = await query;
+        const { data: conversations, error: conversationsError } = await query;
 
-        if (decisionsError) {
-            console.error('Fetch decisions error:', decisionsError);
-            return res.status(500).json({ error: 'Failed to fetch decisions' });
+        if (conversationsError) {
+            console.error('Fetch conversations error:', conversationsError);
+            return res.status(500).json({ error: 'Failed to fetch conversations' });
         }
 
-        const decisionsWithDetails = await Promise.all(decisions.map(async (decision) => {
+        const conversationsWithDetails = await Promise.all(conversations.map(async (conversation) => {
             const { data: user } = await supabase
                 .from('users')
                 .select('id, email, display_name')
-                .eq('id', decision.user_id)
+                .eq('id', conversation.user_id)
                 .single();
 
             const { count } = await supabase
-                .from('decision_feedback')
+                .from('messages')
                 .select('*', { count: 'exact', head: true })
-                .eq('decision_id', decision.id);
+                .eq('conversation_id', conversation.id)
+                .is('deleted_at', null);
 
             return {
-                id: decision.id,
-                user_id: decision.user_id,
+                id: conversation.id,
+                user_id: conversation.user_id,
                 user_email: user?.email || 'Unknown',
                 user_name: user?.display_name || 'Unknown',
-                title: decision.title,
-                status: decision.status,
-                priority: decision.priority,
-                created_at: decision.created_at,
-                updated_at: decision.updated_at,
-                feedback_count: count || 0
+                status: conversation.status,
+                priority: conversation.priority,
+                summary_card: conversation.summary_card,
+                created_at: conversation.created_at,
+                updated_at: conversation.updated_at,
+                message_count: count || 0
             };
         }));
 
-        res.json({ decisions: decisionsWithDetails });
+        res.json({ conversations: conversationsWithDetails });
     } catch (error) {
-        console.error('Get decisions exception:', error);
+        console.error('Get conversations exception:', error);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
 
-router.get('/decisions/:id', authenticateToken, requireAdmin, async (req, res) => {
+router.get('/conversations/:id', authenticateToken, requireAdmin, async (req, res) => {
     try {
         const { id } = req.params;
 
-        const { data: decision, error: decisionError } = await supabase
-            .from('decisions')
+        const { data: conversation, error: conversationError } = await supabase
+            .from('conversations')
             .select('*')
             .eq('id', id)
             .single();
 
-        if (decisionError || !decision) {
-            return res.status(404).json({ error: 'Decision not found' });
+        if (conversationError || !conversation) {
+            return res.status(404).json({ error: 'Conversation not found' });
         }
 
         const { data: user, error: userError } = await supabase
             .from('users')
-            .select('id, email, display_name')
-            .eq('id', decision.user_id)
+            .select('id, email, display_name, email_notifications_enabled')
+            .eq('id', conversation.user_id)
             .single();
 
         if (userError) {
             console.error('Fetch user error:', userError);
         }
 
-        const { data: feedback, error: feedbackError } = await supabase
-            .from('decision_feedback')
+        const { data: messages, error: messagesError } = await supabase
+            .from('messages')
             .select('*')
-            .eq('decision_id', id)
+            .eq('conversation_id', id)
+            .is('deleted_at', null)
             .order('created_at', { ascending: true });
 
-        if (feedbackError) {
-            console.error('Fetch feedback error:', feedbackError);
+        if (messagesError) {
+            console.error('Fetch messages error:', messagesError);
         }
 
         res.json({
-            decision,
+            conversation,
             user: user || null,
-            feedback: feedback || []
+            messages: messages || []
         });
     } catch (error) {
-        console.error('Get decision exception:', error);
+        console.error('Get conversation exception:', error);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
 
-router.post('/decisions/:id/respond', authenticateToken, requireAdmin, async (req, res) => {
+const multer = require('multer');
+const { sendAdminResponseEmail } = require('../utils/email');
+
+const upload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 5 * 1024 * 1024 },
+    fileFilter: (req, file, cb) => {
+        const allowedTypes = ['image/png', 'image/jpeg', 'application/pdf'];
+        if (allowedTypes.includes(file.mimetype)) {
+            cb(null, true);
+        } else {
+            cb(new Error('Only PNG, JPG, and PDF files are allowed'));
+        }
+    }
+});
+
+router.post('/conversations/:id/respond', authenticateToken, requireAdmin, upload.single('file'), async (req, res) => {
     try {
         const { id } = req.params;
-        const { content } = req.body;
+        const { content, tag } = req.body;
 
         if (!content || content.trim().length === 0) {
             return res.status(400).json({ error: 'Content required' });
         }
 
-        const { data: decision, error: fetchError } = await supabase
-            .from('decisions')
-            .select('status')
+        const { data: conversation, error: fetchError } = await supabase
+            .from('conversations')
+            .select('user_id, status')
             .eq('id', id)
             .single();
 
-        if (fetchError || !decision) {
-            return res.status(404).json({ error: 'Decision not found' });
+        if (fetchError || !conversation) {
+            return res.status(404).json({ error: 'Conversation not found' });
         }
 
-        const { data: newFeedback, error: insertError } = await supabase
-            .from('decision_feedback')
+        let attachmentUrl = null;
+        let attachmentName = null;
+
+        if (req.file) {
+            const fileName = `admin/${Date.now()}_${req.file.originalname}`;
+            
+            const { data: uploadData, error: uploadError } = await supabase.storage
+                .from('message-attachments')
+                .upload(fileName, req.file.buffer, {
+                    contentType: req.file.mimetype,
+                    upsert: false
+                });
+
+            if (uploadError) {
+                console.error('File upload error:', uploadError);
+                return res.status(500).json({ error: 'Failed to upload file' });
+            }
+
+            const { data: urlData } = supabase.storage
+                .from('message-attachments')
+                .getPublicUrl(fileName);
+
+            attachmentUrl = urlData.publicUrl;
+            attachmentName = req.file.originalname;
+        }
+
+        const { data: newMessage, error: insertError } = await supabase
+            .from('messages')
             .insert({
-                decision_id: id,
+                conversation_id: id,
                 author_id: req.user.id,
                 author_type: 'admin',
-                content: content.trim()
+                content: content.trim(),
+                tag: tag || null,
+                attachment_url: attachmentUrl,
+                attachment_name: attachmentName
             })
             .select()
             .single();
 
         if (insertError) {
-            console.error('Add admin feedback error:', insertError);
-            return res.status(500).json({ error: 'Failed to add feedback' });
+            console.error('Add admin message error:', insertError);
+            return res.status(500).json({ error: 'Failed to add message' });
         }
 
-        if (decision.status === 'under_review') {
-            await supabase
-                .from('decisions')
-                .update({ status: 'responded' })
-                .eq('id', id);
+        const { data: user } = await supabase
+            .from('users')
+            .select('email, email_notifications_enabled')
+            .eq('id', conversation.user_id)
+            .single();
+
+        if (user && user.email_notifications_enabled) {
+            await sendAdminResponseEmail(user.email, content.substring(0, 100));
         }
 
         res.status(201).json({
-            feedback_id: newFeedback.id
+            message_id: newMessage.id
         });
     } catch (error) {
         console.error('Admin respond exception:', error);
@@ -347,32 +397,58 @@ router.post('/decisions/:id/respond', authenticateToken, requireAdmin, async (re
     }
 });
 
-router.patch('/decisions/:id', authenticateToken, requireAdmin, async (req, res) => {
+router.patch('/conversations/:id/summary', authenticateToken, requireAdmin, async (req, res) => {
     try {
         const { id } = req.params;
-        const { status, priority } = req.body;
+        const { summary_card } = req.body;
+
+        if (!summary_card) {
+            return res.status(400).json({ error: 'summary_card required' });
+        }
+
+        const { error: updateError } = await supabase
+            .from('conversations')
+            .update({ summary_card })
+            .eq('id', id);
+
+        if (updateError) {
+            console.error('Update summary error:', updateError);
+            return res.status(500).json({ error: 'Failed to update summary' });
+        }
+
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Update summary exception:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+router.patch('/conversations/:id', authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { priority, admin_notes } = req.body;
 
         const updateData = {};
-        if (status !== undefined) updateData.status = status;
         if (priority !== undefined) updateData.priority = priority;
+        if (admin_notes !== undefined) updateData.admin_notes = admin_notes;
 
         if (Object.keys(updateData).length === 0) {
             return res.status(400).json({ error: 'No fields to update' });
         }
 
         const { error: updateError } = await supabase
-            .from('decisions')
+            .from('conversations')
             .update(updateData)
             .eq('id', id);
 
         if (updateError) {
-            console.error('Update decision error:', updateError);
-            return res.status(500).json({ error: 'Failed to update decision' });
+            console.error('Update conversation error:', updateError);
+            return res.status(500).json({ error: 'Failed to update conversation' });
         }
 
         res.json({ success: true });
     } catch (error) {
-        console.error('Update decision exception:', error);
+        console.error('Update conversation exception:', error);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
