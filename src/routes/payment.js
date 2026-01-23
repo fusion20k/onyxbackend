@@ -96,7 +96,7 @@ router.post('/customer-portal', authenticateToken, async (req, res) => {
     try {
         const { data: user, error: userError } = await supabase
             .from('users')
-            .select('stripe_customer_id')
+            .select('stripe_customer_id, email, paid')
             .eq('id', req.user.id)
             .single();
 
@@ -104,12 +104,32 @@ router.post('/customer-portal', authenticateToken, async (req, res) => {
             return res.status(404).json({ error: 'User not found' });
         }
 
-        if (!user.stripe_customer_id) {
-            return res.status(400).json({ error: 'No payment history found' });
+        if (!user.paid) {
+            return res.status(400).json({ error: 'No payment found' });
+        }
+
+        let customerId = user.stripe_customer_id;
+
+        if (!customerId) {
+            const customers = await stripe.customers.list({
+                email: user.email,
+                limit: 1
+            });
+
+            if (customers.data.length === 0) {
+                return res.status(400).json({ error: 'No payment history found' });
+            }
+
+            customerId = customers.data[0].id;
+
+            await supabase
+                .from('users')
+                .update({ stripe_customer_id: customerId })
+                .eq('id', req.user.id);
         }
 
         const portalSession = await stripe.billingPortal.sessions.create({
-            customer: user.stripe_customer_id,
+            customer: customerId,
             return_url: `${process.env.FRONTEND_URL}/workspace`
         });
 
