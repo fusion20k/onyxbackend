@@ -316,14 +316,13 @@ router.post('/:id/ask-followup', authenticateToken, async (req, res) => {
 
 router.post('/:id/commit', authenticateToken, async (req, res) => {
   try {
-    const { note, selected_option_id } = req.body;
+    const { note } = req.body;
 
     const { data: decision, error } = await supabase
       .from('decisions')
       .update({
         status: 'committed',
-        committed_at: new Date().toISOString(),
-        selected_option_id: selected_option_id || null
+        committed_at: new Date().toISOString()
       })
       .eq('id', req.params.id)
       .eq('user_id', req.user.id)
@@ -332,12 +331,12 @@ router.post('/:id/commit', authenticateToken, async (req, res) => {
 
     if (error) throw error;
 
-    if (note || selected_option_id) {
+    if (note) {
       await supabase
         .from('decision_recommendations')
         .update({ 
           user_committed: true,
-          user_note: note || null
+          user_note: note
         })
         .eq('decision_id', req.params.id);
     }
