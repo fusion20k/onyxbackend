@@ -79,58 +79,64 @@ router.post('/create', authenticateToken, async (req, res) => {
     }
     console.log('[DECISIONS] Options created:', insertedOptions.length);
 
-    console.log('[DECISIONS] Running stress tests...');
-    const stressTests = await runStressTests(decision, understanding.options);
-    console.log('[DECISIONS] Stress tests complete');
-
-    console.log('[DECISIONS] Updating options with stress test results...');
-    for (let i = 0; i < insertedOptions.length; i++) {
-      const test = stressTests[i];
-      await supabase
-        .from('decision_options')
-        .update({
-          upside: test.upside,
-          downside: test.downside,
-          key_assumptions: test.key_assumptions,
-          fragility_score: test.fragility_score,
-          success_probability: test.success_probability,
-          constraint_violation_risk: test.constraint_violation_risk,
-          assumption_sensitivity: test.assumption_sensitivity
-        })
-        .eq('id', insertedOptions[i].id);
-    }
-
-    console.log('[DECISIONS] Generating recommendation...');
-    const recommendation = await generateRecommendation(decision, stressTests);
-    const recommendedOption = insertedOptions.find(opt => opt.name === recommendation.recommended_option_name);
-    console.log('[DECISIONS] Recommendation generated for:', recommendedOption?.name);
-
-    console.log('[DECISIONS] Saving recommendation...');
-    const { error: recError } = await supabase
-      .from('decision_recommendations')
-      .insert({
-        decision_id: decision.id,
-        recommended_option_id: recommendedOption?.id,
-        reasoning: recommendation.reasoning,
-        why_not_alternatives: recommendation.why_not_alternatives,
-        execution_plan: Array.isArray(recommendation.execution_plan) 
-          ? JSON.stringify(recommendation.execution_plan)
-          : recommendation.execution_plan
-      });
-
-    if (recError) {
-      console.error('[DECISIONS] Recommendation insert error:', recError);
-      throw recError;
-    }
-
-    console.log('[DECISIONS] Updating status to ready...');
-    await supabase
-      .from('decisions')
-      .update({ status: 'ready' })
-      .eq('id', decision.id);
-
-    console.log('[DECISIONS] Decision creation complete:', decision.id);
     res.json({ success: true, decision_id: decision.id });
+
+    (async () => {
+      try {
+        console.log('[DECISIONS] Running stress tests (async)...');
+        const stressTests = await runStressTests(decision, understanding.options);
+        console.log('[DECISIONS] Stress tests complete');
+
+        console.log('[DECISIONS] Updating options with stress test results...');
+        for (let i = 0; i < insertedOptions.length; i++) {
+          const test = stressTests[i];
+          await supabase
+            .from('decision_options')
+            .update({
+              upside: test.upside,
+              downside: test.downside,
+              key_assumptions: test.key_assumptions,
+              fragility_score: test.fragility_score,
+              success_probability: test.success_probability,
+              constraint_violation_risk: test.constraint_violation_risk,
+              assumption_sensitivity: test.assumption_sensitivity
+            })
+            .eq('id', insertedOptions[i].id);
+        }
+
+        console.log('[DECISIONS] Generating recommendation...');
+        const recommendation = await generateRecommendation(decision, stressTests);
+        const recommendedOption = insertedOptions.find(opt => opt.name === recommendation.recommended_option_name);
+        console.log('[DECISIONS] Recommendation generated for:', recommendedOption?.name);
+
+        console.log('[DECISIONS] Saving recommendation...');
+        await supabase
+          .from('decision_recommendations')
+          .insert({
+            decision_id: decision.id,
+            recommended_option_id: recommendedOption?.id,
+            reasoning: recommendation.reasoning,
+            why_not_alternatives: recommendation.why_not_alternatives,
+            execution_plan: Array.isArray(recommendation.execution_plan) 
+              ? JSON.stringify(recommendation.execution_plan)
+              : recommendation.execution_plan
+          });
+
+        console.log('[DECISIONS] Updating status to ready...');
+        await supabase
+          .from('decisions')
+          .update({ status: 'ready' })
+          .eq('id', decision.id);
+
+        console.log('[DECISIONS] Decision analysis complete:', decision.id);
+      } catch (asyncError) {
+        console.error('[DECISIONS] Async processing error:', asyncError);
+        await supabase
+          .from('decisions')
+          .update({ status: 'error' })
+          .eq('id', decision.id);
+      }
+    })();
 
   } catch (error) {
     console.error('[DECISIONS] Decision creation error:', error);
