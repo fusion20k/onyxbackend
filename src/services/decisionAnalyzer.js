@@ -49,9 +49,15 @@ Extract and return a JSON object with:
   "risk_tolerance": "conservative|balanced|aggressive",
   "options": [
     {"name": "Option A", "description": "Brief description"},
-    {"name": "Option B", "description": "Brief description"}
+    {"name": "Option B", "description": "Brief description"},
+    {"name": "Option C", "description": "Brief description"}
   ]
 }
+
+IMPORTANT: Extract or infer exactly 3 distinct options to analyze. If the user only mentions 1-2 options, infer a third option that could be:
+- A variation of an existing option
+- A hybrid approach combining elements
+- A deliberate "do nothing" or "status quo" baseline for comparison
 
 Be concise. If something is unclear, make a reasonable inference.`;
 
@@ -152,6 +158,8 @@ Respond with valid JSON only.`;
 Decision: ${decision.title}
 Goal: ${decision.goal}
 Risk Tolerance: ${decision.risk_tolerance}
+Time Horizon: ${decision.time_horizon}
+Constraints: ${decision.constraints?.join(', ')}
 
 Stress test results:
 ${JSON.stringify(stressTestResults, null, 2)}
@@ -160,7 +168,8 @@ Provide recommendation as JSON:
 {
   "recommended_option_name": "Option B",
   "reasoning": "2-3 sentence explanation of why this is most robust",
-  "why_not_alternatives": "Brief comparison: why not the other options?"
+  "why_not_alternatives": "Brief comparison: why not the other options?",
+  "execution_plan": "Step-by-step execution plan for the recommended option. Break down into concrete sequenced actions, identify critical path dependencies, highlight early validation points, specify metrics to track, and define decision gates for pivoting or aborting. Keep it tactical and time-bound."
 }
 
 Focus on: Which option stays viable across most scenarios, not just best-case.`;

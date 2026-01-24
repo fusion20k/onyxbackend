@@ -112,7 +112,8 @@ router.post('/create', authenticateToken, async (req, res) => {
         decision_id: decision.id,
         recommended_option_id: recommendedOption?.id,
         reasoning: recommendation.reasoning,
-        why_not_alternatives: recommendation.why_not_alternatives
+        why_not_alternatives: recommendation.why_not_alternatives,
+        execution_plan: recommendation.execution_plan
       });
 
     if (recError) {
