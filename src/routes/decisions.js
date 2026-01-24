@@ -190,7 +190,7 @@ router.post('/:id/confirm-understanding', authenticateToken, async (req, res) =>
   try {
     const { goal, primary_metric, time_horizon, constraints, risk_tolerance } = req.body;
 
-    const { error } = await supabase
+    const { data: decision, error: updateError } = await supabase
       .from('decisions')
       .update({
         goal,
@@ -201,9 +201,57 @@ router.post('/:id/confirm-understanding', authenticateToken, async (req, res) =>
         updated_at: new Date().toISOString()
       })
       .eq('id', req.params.id)
-      .eq('user_id', req.user.id);
+      .eq('user_id', req.user.id)
+      .select()
+      .single();
 
-    if (error) throw error;
+    if (updateError) throw updateError;
+
+    const { data: options } = await supabase
+      .from('decision_options')
+      .select('*')
+      .eq('decision_id', req.params.id)
+      .order('position');
+
+    if (options && options.length > 0) {
+      const stressTests = await runStressTests(decision, options);
+      
+      for (let i = 0; i < options.length; i++) {
+        const test = stressTests[i];
+        if (test) {
+          await supabase
+            .from('decision_options')
+            .update({
+              upside: test.upside,
+              downside: test.downside,
+              key_assumptions: test.key_assumptions,
+              fragility_score: test.fragility_score,
+              success_probability: test.success_probability,
+              constraint_violation_risk: test.constraint_violation_risk,
+              assumption_sensitivity: test.assumption_sensitivity
+            })
+            .eq('id', options[i].id);
+        }
+      }
+
+      const recommendation = await generateRecommendation(decision, stressTests);
+      const recommendedOption = options.find(opt => opt.name === recommendation.recommended_option_name);
+
+      await supabase
+        .from('decision_recommendations')
+        .delete()
+        .eq('decision_id', req.params.id);
+
+      await supabase
+        .from('decision_recommendations')
+        .insert({
+          decision_id: decision.id,
+          recommended_option_id: recommendedOption?.id,
+          reasoning: recommendation.reasoning,
+          why_not_alternatives: recommendation.why_not_alternatives,
+          execution_plan: recommendation.execution_plan
+        });
+    }
 
     res.json({ success: true });
 
