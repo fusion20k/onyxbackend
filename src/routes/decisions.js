@@ -6,15 +6,18 @@ const { extractUnderstanding, runStressTests, generateRecommendation, answerFoll
 
 router.post('/create', authenticateToken, async (req, res) => {
   try {
+    console.log('[DECISIONS] Create request received from user:', req.user.id);
     const { content } = req.body;
 
     if (!content || content.length < 50) {
+      console.log('[DECISIONS] Content validation failed, length:', content?.length);
       return res.status(400).json({ 
         success: false, 
         error: 'Please provide at least 50 characters describing your decision' 
       });
     }
 
+    console.log('[DECISIONS] Checking for existing active decision...');
     const { data: existing } = await supabase
       .from('decisions')
       .select('id')
@@ -23,14 +26,18 @@ router.post('/create', authenticateToken, async (req, res) => {
       .maybeSingle();
 
     if (existing) {
+      console.log('[DECISIONS] User already has active decision:', existing.id);
       return res.status(409).json({ 
         success: false, 
         error: 'You already have an active decision. Commit or archive it first.' 
       });
     }
 
+    console.log('[DECISIONS] Extracting understanding with AI...');
     const understanding = await extractUnderstanding(content);
+    console.log('[DECISIONS] Understanding extracted:', understanding.title);
 
+    console.log('[DECISIONS] Creating decision record...');
     const { data: decision, error: decisionError } = await supabase
       .from('decisions')
       .insert({
@@ -47,8 +54,13 @@ router.post('/create', authenticateToken, async (req, res) => {
       .select()
       .single();
 
-    if (decisionError) throw decisionError;
+    if (decisionError) {
+      console.error('[DECISIONS] Database insert error:', decisionError);
+      throw decisionError;
+    }
+    console.log('[DECISIONS] Decision created:', decision.id);
 
+    console.log('[DECISIONS] Creating options...');
     const optionsToInsert = understanding.options.map((opt, idx) => ({
       decision_id: decision.id,
       name: opt.name,
@@ -56,13 +68,22 @@ router.post('/create', authenticateToken, async (req, res) => {
       position: idx
     }));
 
-    const { data: insertedOptions } = await supabase
+    const { data: insertedOptions, error: optionsError } = await supabase
       .from('decision_options')
       .insert(optionsToInsert)
       .select();
 
-    const stressTests = await runStressTests(decision, understanding.options);
+    if (optionsError) {
+      console.error('[DECISIONS] Options insert error:', optionsError);
+      throw optionsError;
+    }
+    console.log('[DECISIONS] Options created:', insertedOptions.length);
 
+    console.log('[DECISIONS] Running stress tests...');
+    const stressTests = await runStressTests(decision, understanding.options);
+    console.log('[DECISIONS] Stress tests complete');
+
+    console.log('[DECISIONS] Updating options with stress test results...');
     for (let i = 0; i < insertedOptions.length; i++) {
       const test = stressTests[i];
       await supabase
@@ -79,10 +100,13 @@ router.post('/create', authenticateToken, async (req, res) => {
         .eq('id', insertedOptions[i].id);
     }
 
+    console.log('[DECISIONS] Generating recommendation...');
     const recommendation = await generateRecommendation(decision, stressTests);
     const recommendedOption = insertedOptions.find(opt => opt.name === recommendation.recommended_option_name);
+    console.log('[DECISIONS] Recommendation generated for:', recommendedOption?.name);
 
-    await supabase
+    console.log('[DECISIONS] Saving recommendation...');
+    const { error: recError } = await supabase
       .from('decision_recommendations')
       .insert({
         decision_id: decision.id,
@@ -91,16 +115,28 @@ router.post('/create', authenticateToken, async (req, res) => {
         why_not_alternatives: recommendation.why_not_alternatives
       });
 
+    if (recError) {
+      console.error('[DECISIONS] Recommendation insert error:', recError);
+      throw recError;
+    }
+
+    console.log('[DECISIONS] Updating status to ready...');
     await supabase
       .from('decisions')
       .update({ status: 'ready' })
       .eq('id', decision.id);
 
+    console.log('[DECISIONS] Decision creation complete:', decision.id);
     res.json({ success: true, decision_id: decision.id });
 
   } catch (error) {
-    console.error('Decision creation error:', error);
-    res.status(500).json({ success: false, error: 'Failed to create decision' });
+    console.error('[DECISIONS] Decision creation error:', error);
+    console.error('[DECISIONS] Error stack:', error.stack);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message || 'Failed to create decision',
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
   }
 });
 
@@ -302,16 +338,41 @@ router.get('/library/:id', authenticateToken, async (req, res) => {
       .eq('decision_id', decision.id)
       .maybeSingle();
 
+    const { data: followups } = await supabase
+      .from('decision_followups')
+      .select('*')
+      .eq('decision_id', decision.id)
+      .order('created_at');
+
     res.json({
       success: true,
       decision,
       options: options || [],
-      recommendation
+      recommendation,
+      followups: followups || []
     });
 
   } catch (error) {
     console.error('Get library decision error:', error);
     res.status(500).json({ success: false, error: 'Failed to get decision' });
+  }
+});
+
+router.delete('/:id', authenticateToken, async (req, res) => {
+  try {
+    const { error } = await supabase
+      .from('decisions')
+      .delete()
+      .eq('id', req.params.id)
+      .eq('user_id', req.user.id);
+
+    if (error) throw error;
+
+    res.json({ success: true });
+
+  } catch (error) {
+    console.error('Delete decision error:', error);
+    res.status(500).json({ success: false, error: 'Failed to delete decision' });
   }
 });
 

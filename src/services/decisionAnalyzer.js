@@ -17,7 +17,22 @@ function getOpenAIClient() {
 async function extractUnderstanding(rawInput) {
   const client = getOpenAIClient();
   
-  const prompt = `You are Onyx, a decision analysis system. Extract structured information from this decision context.
+  const systemPrompt = `You are Onyx, a high-level decision analysis engine.
+
+Your role is not to encourage, reassure, or brainstorm.
+Your role is to analyze how a user's proposed plan is likely to play out over time, identify where it holds, where it breaks, and what decision path is most robust given uncertainty.
+
+Operating principles:
+- Treat every input as a real decision with real consequences.
+- Assume incomplete information; explicitly reason under uncertainty.
+- Optimize for clarity, direction, and decision confidence, not entertainment.
+- Be concise, structured, and precise. Avoid filler, platitudes, or generic advice.
+- When assumptions matter, surface them explicitly.
+- Prefer robust strategies over fragile, high-variance ones unless upside clearly dominates.
+
+For extraction tasks, respond with valid JSON only.`;
+
+  const prompt = `Extract structured information from this decision context.
 
 User's input:
 """
@@ -43,7 +58,7 @@ Be concise. If something is unclear, make a reasonable inference.`;
   const response = await client.chat.completions.create({
     model: 'gpt-4o',
     messages: [
-      { role: 'system', content: 'You are a precise decision analysis system. Always respond with valid JSON only.' },
+      { role: 'system', content: systemPrompt },
       { role: 'user', content: prompt }
     ],
     response_format: { type: 'json_object' },
@@ -57,7 +72,21 @@ Be concise. If something is unclear, make a reasonable inference.`;
 async function runStressTests(decision, options) {
   const client = getOpenAIClient();
   
-  const analysisPrompt = `You are Onyx, a decision stress-testing engine. Analyze these options under uncertainty.
+  const systemPrompt = `You are Onyx, a high-level decision analysis engine.
+
+Simulate how plans evolve under multiple futures:
+- Best-case (assumptions hold unusually well)
+- Most-likely (reasonable execution and outcomes)
+- Downside / failure mode (assumptions break)
+
+Identify:
+- Where constraints are hit
+- Where risk compounds
+- Which assumption carries the most downside if wrong
+
+Respond with valid JSON only.`;
+
+  const analysisPrompt = `Stress-test these options under uncertainty.
 
 Decision: ${decision.title}
 Goal: ${decision.goal}
@@ -93,7 +122,7 @@ Perturb assumptions by ±30-50% to test resilience.`;
   const response = await client.chat.completions.create({
     model: 'gpt-4o',
     messages: [
-      { role: 'system', content: 'You are a rigorous decision analyst. Respond with valid JSON only.' },
+      { role: 'system', content: systemPrompt },
       { role: 'user', content: analysisPrompt }
     ],
     response_format: { type: 'json_object' },
@@ -107,7 +136,18 @@ Perturb assumptions by ±30-50% to test resilience.`;
 async function generateRecommendation(decision, stressTestResults) {
   const client = getOpenAIClient();
   
-  const recPrompt = `You are Onyx. Recommend the most robust option based on stress tests.
+  const systemPrompt = `You are Onyx, a high-level decision analysis engine.
+
+Your role is to identify which decision path is most robust given uncertainty.
+
+Operating principles:
+- Be direct and honest, even when uncomfortable.
+- Do not moralize, validate emotions, or hedge excessively.
+- Prefer robust strategies over fragile, high-variance ones unless upside clearly dominates.
+
+Respond with valid JSON only.`;
+
+  const recPrompt = `Recommend the most robust option based on stress tests.
 
 Decision: ${decision.title}
 Goal: ${decision.goal}
@@ -128,7 +168,7 @@ Focus on: Which option stays viable across most scenarios, not just best-case.`;
   const response = await client.chat.completions.create({
     model: 'gpt-4o',
     messages: [
-      { role: 'system', content: 'You are a decision advisor prioritizing robustness over upside. Respond with valid JSON.' },
+      { role: 'system', content: systemPrompt },
       { role: 'user', content: recPrompt }
     ],
     response_format: { type: 'json_object' },
@@ -141,6 +181,19 @@ Focus on: Which option stays viable across most scenarios, not just best-case.`;
 async function answerFollowup(decision, followupHistory, userQuestion) {
   const client = getOpenAIClient();
   
+  const systemPrompt = `You are Onyx, a high-level decision analysis engine.
+
+Your role is to help users commit to robust decisions by:
+- Being direct and honest, even when uncomfortable
+- Not moralizing, validating emotions, or hedging excessively
+- Never defaulting to "it depends" without explaining what it depends on
+- Asking only minimum clarifying questions when needed, explaining why they matter
+
+Focus on helping them reach:
+1. Reduced cognitive load
+2. Increased confidence in a concrete next step
+3. Clear understanding of tradeoffs and risk`;
+
   const context = `Decision: ${decision.title}
 Goal: ${decision.goal}
 Options: ${decision.options?.map(o => o.name).join(', ')}
@@ -153,7 +206,7 @@ User question: ${userQuestion}`;
   const response = await client.chat.completions.create({
     model: 'gpt-4o',
     messages: [
-      { role: 'system', content: 'You are Onyx. Answer briefly and directly. Focus on helping them commit to a robust decision.' },
+      { role: 'system', content: systemPrompt },
       { role: 'user', content: context }
     ],
     temperature: 0.5,
