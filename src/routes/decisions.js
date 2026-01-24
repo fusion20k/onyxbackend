@@ -113,7 +113,9 @@ router.post('/create', authenticateToken, async (req, res) => {
         recommended_option_id: recommendedOption?.id,
         reasoning: recommendation.reasoning,
         why_not_alternatives: recommendation.why_not_alternatives,
-        execution_plan: recommendation.execution_plan
+        execution_plan: Array.isArray(recommendation.execution_plan) 
+          ? JSON.stringify(recommendation.execution_plan)
+          : recommendation.execution_plan
       });
 
     if (recError) {
@@ -249,7 +251,9 @@ router.post('/:id/confirm-understanding', authenticateToken, async (req, res) =>
           recommended_option_id: recommendedOption?.id,
           reasoning: recommendation.reasoning,
           why_not_alternatives: recommendation.why_not_alternatives,
-          execution_plan: recommendation.execution_plan
+          execution_plan: Array.isArray(recommendation.execution_plan) 
+            ? JSON.stringify(recommendation.execution_plan)
+            : recommendation.execution_plan
         });
     }
 
@@ -312,13 +316,14 @@ router.post('/:id/ask-followup', authenticateToken, async (req, res) => {
 
 router.post('/:id/commit', authenticateToken, async (req, res) => {
   try {
-    const { note } = req.body;
+    const { note, selected_option_id } = req.body;
 
     const { data: decision, error } = await supabase
       .from('decisions')
       .update({
         status: 'committed',
-        committed_at: new Date().toISOString()
+        committed_at: new Date().toISOString(),
+        selected_option_id: selected_option_id || null
       })
       .eq('id', req.params.id)
       .eq('user_id', req.user.id)
@@ -327,12 +332,12 @@ router.post('/:id/commit', authenticateToken, async (req, res) => {
 
     if (error) throw error;
 
-    if (note) {
+    if (note || selected_option_id) {
       await supabase
         .from('decision_recommendations')
         .update({ 
           user_committed: true,
-          user_note: note 
+          user_note: note || null
         })
         .eq('decision_id', req.params.id);
     }

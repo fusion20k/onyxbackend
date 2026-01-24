@@ -169,8 +169,30 @@ Provide recommendation as JSON:
   "recommended_option_name": "Option B",
   "reasoning": "2-3 sentence explanation of why this is most robust",
   "why_not_alternatives": "Brief comparison: why not the other options?",
-  "execution_plan": "Step-by-step execution plan for the recommended option. Break down into concrete sequenced actions, identify critical path dependencies, highlight early validation points, specify metrics to track, and define decision gates for pivoting or aborting. Keep it tactical and time-bound."
+  "execution_plan": [
+    {
+      "step": "Short step name",
+      "action": "Specific action to take",
+      "timeline": "When to do this (e.g., 'Week 1', 'Day 1-3', 'Immediately')",
+      "dependencies": "What must happen first (or 'None')",
+      "validation_point": "How to verify this step worked",
+      "metrics": "What to measure",
+      "success_criteria": "Concrete threshold that indicates success"
+    }
+  ]
 }
+
+CRITICAL: The execution_plan MUST be a JSON array of step objects, not plain text.
+
+Requirements for execution plan:
+- Design to maximize probability of success within user's timeframe
+- Each step must have clear success criteria
+- Include early warning metrics that signal when to pivot
+- Build in decision gates at 25%, 50%, and 75% completion
+- Make timeline realistic but aggressive
+- Account for dependencies and potential blockers
+- Specify exact metrics to track
+- Define what "winning" looks like at each stage
 
 Focus on: Which option stays viable across most scenarios, not just best-case.`;
 
