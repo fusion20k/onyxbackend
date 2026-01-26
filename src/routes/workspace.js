@@ -1,455 +1,432 @@
 const express = require('express');
 const router = express.Router();
-const multer = require('multer');
 const supabase = require('../utils/supabase');
 const { authenticateToken } = require('../middleware/auth');
+const OpenAI = require('openai');
 
-const upload = multer({
-    storage: multer.memoryStorage(),
-    limits: { fileSize: 5 * 1024 * 1024 },
-    fileFilter: (req, file, cb) => {
-        const allowedTypes = ['image/png', 'image/jpeg', 'application/pdf'];
-        if (allowedTypes.includes(file.mimetype)) {
-            cb(null, true);
-        } else {
-            cb(new Error('Only PNG, JPG, and PDF files are allowed'));
+const openai = new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY
+});
+
+router.get('/metrics', authenticateToken, async (req, res) => {
+    try {
+        const { data: leads, error: leadsError } = await supabase
+            .from('workspace_leads')
+            .select('id, reply_received, meeting_booked')
+            .eq('user_id', req.user.id);
+
+        if (leadsError) {
+            console.error('Fetch leads error:', leadsError);
+            return res.status(500).json({ error: 'Failed to fetch metrics' });
         }
+
+        const { data: campaigns, error: campaignsError } = await supabase
+            .from('campaigns')
+            .select('id')
+            .eq('user_id', req.user.id)
+            .eq('active', true);
+
+        if (campaignsError) {
+            console.error('Fetch campaigns error:', campaignsError);
+        }
+
+        const leadsContacted = leads ? leads.length : 0;
+        const repliesReceived = leads ? leads.filter(l => l.reply_received).length : 0;
+        const replyRate = leadsContacted > 0 ? (repliesReceived / leadsContacted * 100).toFixed(1) : 0;
+        const meetingsBooked = leads ? leads.filter(l => l.meeting_booked).length : 0;
+        const activeCampaigns = campaigns ? campaigns.length : 0;
+
+        res.json({
+            leads_contacted: leadsContacted,
+            reply_rate: parseFloat(replyRate),
+            meetings_booked: meetingsBooked,
+            active_campaigns: activeCampaigns,
+            last_updated: new Date().toISOString()
+        });
+    } catch (error) {
+        console.error('Get metrics exception:', error);
+        res.status(500).json({ error: 'Internal server error' });
     }
 });
 
-router.get('/active-conversation', authenticateToken, async (req, res) => {
+router.get('/pipeline', authenticateToken, async (req, res) => {
     try {
-        const { data: conversation, error: convError } = await supabase
-            .from('conversations')
+        const { data: leads, error } = await supabase
+            .from('workspace_leads')
             .select('*')
             .eq('user_id', req.user.id)
-            .eq('status', 'active')
+            .order('updated_at', { ascending: false });
+
+        if (error) {
+            console.error('Fetch pipeline error:', error);
+            return res.status(500).json({ error: 'Failed to fetch pipeline' });
+        }
+
+        const pipeline = {
+            new: [],
+            engaged: [],
+            qualified: [],
+            won: []
+        };
+
+        if (leads) {
+            leads.forEach(lead => {
+                const leadData = {
+                    id: lead.id,
+                    name: lead.name,
+                    company: lead.company,
+                    title: lead.title,
+                    email: lead.email,
+                    linkedin_url: lead.linkedin_url,
+                    last_contact: lead.last_contact,
+                    status: lead.status
+                };
+
+                if (pipeline[lead.status]) {
+                    pipeline[lead.status].push(leadData);
+                }
+            });
+        }
+
+        res.json(pipeline);
+    } catch (error) {
+        console.error('Get pipeline exception:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+router.patch('/pipeline/move', authenticateToken, async (req, res) => {
+    try {
+        const { lead_id, from_status, to_status } = req.body;
+
+        if (!lead_id || !from_status || !to_status) {
+            return res.status(400).json({ error: 'lead_id, from_status, and to_status are required' });
+        }
+
+        const validStatuses = ['new', 'engaged', 'qualified', 'won'];
+        if (!validStatuses.includes(from_status) || !validStatuses.includes(to_status)) {
+            return res.status(400).json({ error: 'Invalid status' });
+        }
+
+        const { data: lead, error: fetchError } = await supabase
+            .from('workspace_leads')
+            .select('user_id, status')
+            .eq('id', lead_id)
+            .single();
+
+        if (fetchError || !lead) {
+            return res.status(404).json({ error: 'Lead not found' });
+        }
+
+        if (lead.user_id !== req.user.id) {
+            return res.status(403).json({ error: 'Not authorized' });
+        }
+
+        if (lead.status !== from_status) {
+            return res.status(400).json({ error: 'Lead status does not match from_status' });
+        }
+
+        const { error: updateError } = await supabase
+            .from('workspace_leads')
+            .update({
+                status: to_status,
+                updated_at: new Date().toISOString()
+            })
+            .eq('id', lead_id);
+
+        if (updateError) {
+            console.error('Move lead error:', updateError);
+            return res.status(500).json({ error: 'Failed to move lead' });
+        }
+
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Move lead exception:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+router.get('/campaign', authenticateToken, async (req, res) => {
+    try {
+        const { data: campaign, error } = await supabase
+            .from('campaigns')
+            .select('*')
+            .eq('user_id', req.user.id)
+            .eq('active', true)
+            .order('created_at', { ascending: false })
+            .limit(1)
             .maybeSingle();
 
-        if (convError) {
-            console.error('Fetch active conversation error:', convError);
-            return res.status(500).json({ error: 'Failed to fetch conversation' });
+        if (error) {
+            console.error('Fetch campaign error:', error);
+            return res.status(500).json({ error: 'Failed to fetch campaign' });
         }
 
-        if (!conversation) {
-            return res.status(404).json({ error: 'No active conversation' });
-        }
-
-        const { data: messages, error: messagesError } = await supabase
-            .from('messages')
-            .select('*')
-            .eq('conversation_id', conversation.id)
-            .is('deleted_at', null)
-            .order('created_at', { ascending: true });
-
-        if (messagesError) {
-            console.error('Fetch messages error:', messagesError);
+        if (!campaign) {
+            return res.json({
+                target_industries: [],
+                company_size: null,
+                titles: [],
+                geography: null,
+                messaging_tone: null
+            });
         }
 
         res.json({
-            conversation,
-            messages: messages || []
+            target_industries: campaign.target_industries || [],
+            company_size: campaign.company_size,
+            titles: campaign.titles || [],
+            geography: campaign.geography,
+            messaging_tone: campaign.messaging_tone
         });
     } catch (error) {
-        console.error('Get active conversation exception:', error);
+        console.error('Get campaign exception:', error);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
 
-router.post('/start-conversation', authenticateToken, upload.single('file'), async (req, res) => {
+router.patch('/campaign', authenticateToken, async (req, res) => {
     try {
-        const { message } = req.body;
+        const { target_industries, company_size, titles, geography, messaging_tone } = req.body;
 
-        if (!message || message.trim().length < 10) {
-            return res.status(400).json({ error: 'Message required (min 10 characters)' });
-        }
-
-        const { data: existing } = await supabase
-            .from('conversations')
+        const { data: existing, error: fetchError } = await supabase
+            .from('campaigns')
             .select('id')
             .eq('user_id', req.user.id)
-            .eq('status', 'active')
+            .eq('active', true)
             .maybeSingle();
 
+        if (fetchError) {
+            console.error('Fetch campaign error:', fetchError);
+            return res.status(500).json({ error: 'Failed to fetch campaign' });
+        }
+
+        const campaignData = {
+            target_industries: target_industries || [],
+            company_size,
+            titles: titles || [],
+            geography,
+            messaging_tone,
+            updated_at: new Date().toISOString()
+        };
+
+        let result;
+
         if (existing) {
-            return res.status(409).json({ error: 'You already have an active conversation' });
-        }
+            const { error: updateError } = await supabase
+                .from('campaigns')
+                .update(campaignData)
+                .eq('id', existing.id);
 
-        const { data: newConversation, error: convError } = await supabase
-            .from('conversations')
-            .insert({
-                user_id: req.user.id,
-                status: 'active'
-            })
-            .select()
-            .single();
-
-        if (convError) {
-            console.error('Create conversation error:', convError);
-            return res.status(500).json({ error: 'Failed to create conversation' });
-        }
-
-        let attachmentUrl = null;
-        let attachmentName = null;
-
-        if (req.file) {
-            const fileName = `${req.user.id}/${Date.now()}_${req.file.originalname}`;
-            
-            const { data: uploadData, error: uploadError } = await supabase.storage
-                .from('message-attachments')
-                .upload(fileName, req.file.buffer, {
-                    contentType: req.file.mimetype,
-                    upsert: false
+            if (updateError) {
+                console.error('Update campaign error:', updateError);
+                return res.status(500).json({ error: 'Failed to update campaign' });
+            }
+        } else {
+            const { error: insertError } = await supabase
+                .from('campaigns')
+                .insert({
+                    ...campaignData,
+                    user_id: req.user.id,
+                    active: true
                 });
 
-            if (uploadError) {
-                console.error('File upload error:', uploadError);
-                return res.status(500).json({ error: 'Failed to upload file' });
+            if (insertError) {
+                console.error('Create campaign error:', insertError);
+                return res.status(500).json({ error: 'Failed to create campaign' });
             }
-
-            const { data: urlData } = supabase.storage
-                .from('message-attachments')
-                .getPublicUrl(fileName);
-
-            attachmentUrl = urlData.publicUrl;
-            attachmentName = req.file.originalname;
-        }
-
-        const { data: newMessage, error: msgError } = await supabase
-            .from('messages')
-            .insert({
-                conversation_id: newConversation.id,
-                author_id: req.user.id,
-                author_type: 'user',
-                content: message.trim(),
-                attachment_url: attachmentUrl,
-                attachment_name: attachmentName
-            })
-            .select()
-            .single();
-
-        if (msgError) {
-            console.error('Create message error:', msgError);
-            return res.status(500).json({ error: 'Failed to send message' });
-        }
-
-        res.status(201).json({
-            conversation_id: newConversation.id,
-            message_id: newMessage.id,
-            attachment_url: attachmentUrl
-        });
-    } catch (error) {
-        console.error('Start conversation exception:', error);
-        res.status(500).json({ error: 'Internal server error' });
-    }
-});
-
-router.post('/send-message/:id', authenticateToken, upload.single('file'), async (req, res) => {
-    try {
-        const { id } = req.params;
-        const { content } = req.body;
-
-        if (!content || content.trim().length === 0) {
-            return res.status(400).json({ error: 'Content required' });
-        }
-
-        const { data: conversation, error: fetchError } = await supabase
-            .from('conversations')
-            .select('user_id, status')
-            .eq('id', id)
-            .single();
-
-        if (fetchError || !conversation) {
-            return res.status(404).json({ error: 'Conversation not found' });
-        }
-
-        if (conversation.user_id !== req.user.id) {
-            return res.status(403).json({ error: 'Not authorized' });
-        }
-
-        if (conversation.status !== 'active') {
-            return res.status(400).json({ error: 'Conversation is not active' });
-        }
-
-        let attachmentUrl = null;
-        let attachmentName = null;
-
-        if (req.file) {
-            const fileName = `${req.user.id}/${Date.now()}_${req.file.originalname}`;
-            
-            const { data: uploadData, error: uploadError } = await supabase.storage
-                .from('message-attachments')
-                .upload(fileName, req.file.buffer, {
-                    contentType: req.file.mimetype,
-                    upsert: false
-                });
-
-            if (uploadError) {
-                console.error('File upload error:', uploadError);
-                return res.status(500).json({ error: 'Failed to upload file' });
-            }
-
-            const { data: urlData } = supabase.storage
-                .from('message-attachments')
-                .getPublicUrl(fileName);
-
-            attachmentUrl = urlData.publicUrl;
-            attachmentName = req.file.originalname;
-        }
-
-        const { data: newMessage, error: insertError } = await supabase
-            .from('messages')
-            .insert({
-                conversation_id: id,
-                author_id: req.user.id,
-                author_type: 'user',
-                content: content.trim(),
-                attachment_url: attachmentUrl,
-                attachment_name: attachmentName
-            })
-            .select()
-            .single();
-
-        if (insertError) {
-            console.error('Send message error:', insertError);
-            return res.status(500).json({ error: 'Failed to send message' });
-        }
-
-        res.status(201).json({
-            message_id: newMessage.id,
-            attachment_url: attachmentUrl
-        });
-    } catch (error) {
-        console.error('Send message exception:', error);
-        res.status(500).json({ error: 'Internal server error' });
-    }
-});
-
-router.patch('/edit-message/:id', authenticateToken, async (req, res) => {
-    try {
-        const { id } = req.params;
-        const { content } = req.body;
-
-        if (!content || content.trim().length === 0) {
-            return res.status(400).json({ error: 'Content required' });
-        }
-
-        const { data: message, error: fetchError } = await supabase
-            .from('messages')
-            .select('author_id, created_at, deleted_at')
-            .eq('id', id)
-            .single();
-
-        if (fetchError || !message) {
-            return res.status(404).json({ error: 'Message not found' });
-        }
-
-        if (message.author_id !== req.user.id) {
-            return res.status(403).json({ error: 'Not authorized' });
-        }
-
-        if (message.deleted_at) {
-            return res.status(400).json({ error: 'Cannot edit deleted message' });
-        }
-
-        const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
-        if (new Date(message.created_at) < tenMinutesAgo) {
-            return res.status(400).json({ error: 'Edit window expired (10 minutes)' });
-        }
-
-        const { error: updateError } = await supabase
-            .from('messages')
-            .update({
-                content: content.trim(),
-                edited_at: new Date().toISOString()
-            })
-            .eq('id', id);
-
-        if (updateError) {
-            console.error('Edit message error:', updateError);
-            return res.status(500).json({ error: 'Failed to edit message' });
-        }
-
-        res.json({ success: true });
-    } catch (error) {
-        console.error('Edit message exception:', error);
-        res.status(500).json({ error: 'Internal server error' });
-    }
-});
-
-router.delete('/delete-message/:id', authenticateToken, async (req, res) => {
-    try {
-        const { id } = req.params;
-
-        const { data: message, error: fetchError } = await supabase
-            .from('messages')
-            .select('author_id, created_at, deleted_at')
-            .eq('id', id)
-            .single();
-
-        if (fetchError || !message) {
-            return res.status(404).json({ error: 'Message not found' });
-        }
-
-        if (message.author_id !== req.user.id) {
-            return res.status(403).json({ error: 'Not authorized' });
-        }
-
-        if (message.deleted_at) {
-            return res.status(400).json({ error: 'Message already deleted' });
-        }
-
-        const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
-        if (new Date(message.created_at) < tenMinutesAgo) {
-            return res.status(400).json({ error: 'Delete window expired (10 minutes)' });
-        }
-
-        const { error: deleteError } = await supabase
-            .from('messages')
-            .update({ deleted_at: new Date().toISOString() })
-            .eq('id', id);
-
-        if (deleteError) {
-            console.error('Delete message error:', deleteError);
-            return res.status(500).json({ error: 'Failed to delete message' });
-        }
-
-        res.json({ success: true });
-    } catch (error) {
-        console.error('Delete message exception:', error);
-        res.status(500).json({ error: 'Internal server error' });
-    }
-});
-
-router.post('/commit/:id', authenticateToken, async (req, res) => {
-    try {
-        const { id } = req.params;
-
-        const { data: conversation, error: fetchError } = await supabase
-            .from('conversations')
-            .select('user_id, status')
-            .eq('id', id)
-            .single();
-
-        if (fetchError || !conversation) {
-            return res.status(404).json({ error: 'Conversation not found' });
-        }
-
-        if (conversation.user_id !== req.user.id) {
-            return res.status(403).json({ error: 'Not authorized' });
-        }
-
-        if (conversation.status !== 'active') {
-            return res.status(400).json({ error: 'Conversation already resolved' });
-        }
-
-        const resolved_at = new Date().toISOString();
-
-        const { error: updateError } = await supabase
-            .from('conversations')
-            .update({
-                status: 'resolved',
-                resolved_at
-            })
-            .eq('id', id);
-
-        if (updateError) {
-            console.error('Commit conversation error:', updateError);
-            return res.status(500).json({ error: 'Failed to commit conversation' });
         }
 
         res.json({
             success: true,
-            resolved_at
+            updated_at: campaignData.updated_at
         });
     } catch (error) {
-        console.error('Commit conversation exception:', error);
+        console.error('Update campaign exception:', error);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
 
-router.get('/library', authenticateToken, async (req, res) => {
+router.get('/analytics', authenticateToken, async (req, res) => {
     try {
-        const { data: conversations, error } = await supabase
-            .from('conversations')
-            .select('id, summary_card, resolved_at, created_at')
+        const period = req.query.period || '30d';
+        
+        let daysBack = 30;
+        if (period === '7d') daysBack = 7;
+        else if (period === '90d') daysBack = 90;
+
+        const startDate = new Date();
+        startDate.setDate(startDate.getDate() - daysBack);
+
+        const { data: leads, error } = await supabase
+            .from('workspace_leads')
+            .select('*')
             .eq('user_id', req.user.id)
-            .eq('status', 'resolved')
-            .order('resolved_at', { ascending: false });
+            .gte('created_at', startDate.toISOString());
 
         if (error) {
-            console.error('Fetch library error:', error);
-            return res.status(500).json({ error: 'Failed to fetch library' });
+            console.error('Fetch analytics error:', error);
+            return res.status(500).json({ error: 'Failed to fetch analytics' });
         }
 
-        res.json({ conversations: conversations || [] });
+        const outreachVolume = {};
+        const replyRateData = {};
+
+        if (leads) {
+            leads.forEach(lead => {
+                const date = lead.created_at ? lead.created_at.split('T')[0] : null;
+                if (date) {
+                    outreachVolume[date] = (outreachVolume[date] || 0) + 1;
+                }
+            });
+
+            Object.keys(outreachVolume).forEach(date => {
+                const dayLeads = leads.filter(l => l.created_at && l.created_at.startsWith(date));
+                const dayReplies = dayLeads.filter(l => l.reply_received).length;
+                replyRateData[date] = dayLeads.length > 0 ? (dayReplies / dayLeads.length * 100).toFixed(1) : 0;
+            });
+        }
+
+        const outreachVolumeArray = Object.keys(outreachVolume).map(date => ({
+            date,
+            count: outreachVolume[date]
+        })).sort((a, b) => a.date.localeCompare(b.date));
+
+        const replyRateArray = Object.keys(replyRateData).map(date => ({
+            date,
+            rate: parseFloat(replyRateData[date])
+        })).sort((a, b) => a.date.localeCompare(b.date));
+
+        const contacted = leads ? leads.length : 0;
+        const replied = leads ? leads.filter(l => l.reply_received).length : 0;
+        const qualified = leads ? leads.filter(l => l.status === 'qualified' || l.status === 'won').length : 0;
+        const meetings = leads ? leads.filter(l => l.meeting_booked).length : 0;
+
+        res.json({
+            outreach_volume: outreachVolumeArray,
+            reply_rate: replyRateArray,
+            conversion_funnel: {
+                contacted,
+                replied,
+                qualified,
+                meetings
+            }
+        });
     } catch (error) {
-        console.error('Get library exception:', error);
+        console.error('Get analytics exception:', error);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
 
-router.get('/library/:id', authenticateToken, async (req, res) => {
+router.get('/conversations', authenticateToken, async (req, res) => {
     try {
-        const { id } = req.params;
-
-        const { data: conversation, error: convError } = await supabase
-            .from('conversations')
+        const { data: messages, error } = await supabase
+            .from('ai_conversations')
             .select('*')
-            .eq('id', id)
             .eq('user_id', req.user.id)
-            .single();
-
-        if (convError || !conversation) {
-            return res.status(404).json({ error: 'Conversation not found' });
-        }
-
-        const { data: messages, error: messagesError } = await supabase
-            .from('messages')
-            .select('*')
-            .eq('conversation_id', id)
-            .is('deleted_at', null)
             .order('created_at', { ascending: true });
 
-        if (messagesError) {
-            console.error('Fetch messages error:', messagesError);
+        if (error) {
+            console.error('Fetch conversations error:', error);
+            return res.status(500).json({ error: 'Failed to fetch conversations' });
         }
 
         res.json({
-            conversation,
             messages: messages || []
         });
     } catch (error) {
-        console.error('Get library conversation exception:', error);
+        console.error('Get conversations exception:', error);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
 
-router.patch('/update-settings', authenticateToken, async (req, res) => {
+router.post('/conversations/send', authenticateToken, async (req, res) => {
     try {
-        const { display_name, email_notifications_enabled } = req.body;
+        const { content } = req.body;
 
-        const updateData = {};
-        if (display_name !== undefined) updateData.display_name = display_name;
-        if (email_notifications_enabled !== undefined) updateData.email_notifications_enabled = email_notifications_enabled;
-
-        if (Object.keys(updateData).length === 0) {
-            return res.status(400).json({ error: 'No fields to update' });
+        if (!content || content.trim().length === 0) {
+            return res.status(400).json({ error: 'Content is required' });
         }
 
-        const { error: updateError } = await supabase
-            .from('users')
-            .update(updateData)
-            .eq('id', req.user.id);
+        const { data: userMessage, error: userMsgError } = await supabase
+            .from('ai_conversations')
+            .insert({
+                user_id: req.user.id,
+                role: 'user',
+                content: content.trim()
+            })
+            .select()
+            .single();
 
-        if (updateError) {
-            console.error('Update settings error:', updateError);
-            return res.status(500).json({ error: 'Failed to update settings' });
+        if (userMsgError) {
+            console.error('Save user message error:', userMsgError);
+            return res.status(500).json({ error: 'Failed to save message' });
         }
 
-        res.json({ success: true });
+        const { data: history, error: historyError } = await supabase
+            .from('ai_conversations')
+            .select('role, content')
+            .eq('user_id', req.user.id)
+            .order('created_at', { ascending: true })
+            .limit(20);
+
+        if (historyError) {
+            console.error('Fetch history error:', historyError);
+        }
+
+        const messages = [
+            {
+                role: 'system',
+                content: `You are an AI co-founder for Onyx, an autonomous outreach platform. You help users with:
+- Setting up and optimizing their outreach campaigns
+- Analyzing lead pipeline and conversion metrics
+- Providing strategic advice on B2B sales and outreach
+- Troubleshooting campaign performance issues
+- Answering questions about the platform features
+
+Be concise, actionable, and supportive. Focus on helping the user succeed with their outreach goals.`
+            },
+            ...(history || []).map(msg => ({
+                role: msg.role,
+                content: msg.content
+            }))
+        ];
+
+        const completion = await openai.chat.completions.create({
+            model: 'gpt-4',
+            messages: messages,
+            max_tokens: 500,
+            temperature: 0.7
+        });
+
+        const assistantResponse = completion.choices[0]?.message?.content || 'Sorry, I encountered an error.';
+
+        const { data: assistantMessage, error: assistantMsgError } = await supabase
+            .from('ai_conversations')
+            .insert({
+                user_id: req.user.id,
+                role: 'assistant',
+                content: assistantResponse
+            })
+            .select()
+            .single();
+
+        if (assistantMsgError) {
+            console.error('Save assistant message error:', assistantMsgError);
+            return res.status(500).json({ error: 'Failed to save response' });
+        }
+
+        res.status(201).json({
+            message_id: userMessage.id,
+            response: {
+                id: assistantMessage.id,
+                role: 'assistant',
+                content: assistantResponse,
+                created_at: assistantMessage.created_at
+            }
+        });
     } catch (error) {
-        console.error('Update settings exception:', error);
+        console.error('Send conversation exception:', error);
         res.status(500).json({ error: 'Internal server error' });
     }
 });

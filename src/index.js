@@ -9,6 +9,7 @@ const paymentRoutes = require('./routes/payment');
 const applicationsRoutes = require('./routes/applications');
 const workspaceRoutes = require('./routes/workspace');
 const decisionsRoutes = require('./routes/decisions');
+const onboardingRoutes = require('./routes/onboarding');
 
 const app = express();
 
@@ -16,6 +17,8 @@ app.use(cors({
     origin: process.env.FRONTEND_URL || '*',
     credentials: true
 }));
+
+app.use('/api/payment/webhook', express.raw({ type: 'application/json' }));
 
 app.use(express.json());
 
@@ -30,6 +33,7 @@ app.use('/api/payment', paymentRoutes);
 app.use('/api/applications', applicationsRoutes);
 app.use('/api/workspace', workspaceRoutes);
 app.use('/api/decisions', decisionsRoutes);
+app.use('/api/onboarding', onboardingRoutes);
 
 app.use(errorHandler);
 
