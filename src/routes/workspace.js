@@ -8,7 +8,30 @@ const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY
 });
 
-router.get('/metrics', authenticateToken, async (req, res) => {
+const checkTrialAccess = async (req, res, next) => {
+    try {
+        const { data: userData } = await supabase
+            .from('users')
+            .select('subscription_status, trial_end')
+            .eq('id', req.user.id)
+            .single();
+
+        if (userData.subscription_status === 'expired' || 
+            (userData.trial_end && new Date(userData.trial_end) < new Date())) {
+            return res.status(403).json({ 
+                error: 'Trial expired',
+                redirect: '/payment'
+            });
+        }
+
+        next();
+    } catch (error) {
+        console.error('Check trial access error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+};
+
+router.get('/metrics', authenticateToken, checkTrialAccess, async (req, res) => {
     try {
         const { data: leads, error: leadsError } = await supabase
             .from('workspace_leads')
@@ -49,7 +72,7 @@ router.get('/metrics', authenticateToken, async (req, res) => {
     }
 });
 
-router.get('/pipeline', authenticateToken, async (req, res) => {
+router.get('/pipeline', authenticateToken, checkTrialAccess, async (req, res) => {
     try {
         const { data: leads, error } = await supabase
             .from('workspace_leads')
@@ -95,7 +118,7 @@ router.get('/pipeline', authenticateToken, async (req, res) => {
     }
 });
 
-router.patch('/pipeline/move', authenticateToken, async (req, res) => {
+router.patch('/pipeline/move', authenticateToken, checkTrialAccess, async (req, res) => {
     try {
         const { lead_id, from_status, to_status } = req.body;
 
@@ -146,7 +169,7 @@ router.patch('/pipeline/move', authenticateToken, async (req, res) => {
     }
 });
 
-router.get('/campaign', authenticateToken, async (req, res) => {
+router.get('/campaign', authenticateToken, checkTrialAccess, async (req, res) => {
     try {
         const { data: campaign, error } = await supabase
             .from('campaigns')
@@ -185,7 +208,7 @@ router.get('/campaign', authenticateToken, async (req, res) => {
     }
 });
 
-router.patch('/campaign', authenticateToken, async (req, res) => {
+router.patch('/campaign', authenticateToken, checkTrialAccess, async (req, res) => {
     try {
         const { target_industries, company_size, titles, geography, messaging_tone } = req.body;
 
@@ -247,7 +270,7 @@ router.patch('/campaign', authenticateToken, async (req, res) => {
     }
 });
 
-router.get('/analytics', authenticateToken, async (req, res) => {
+router.get('/analytics', authenticateToken, checkTrialAccess, async (req, res) => {
     try {
         const period = req.query.period || '30d';
         
@@ -318,7 +341,7 @@ router.get('/analytics', authenticateToken, async (req, res) => {
     }
 });
 
-router.get('/conversations', authenticateToken, async (req, res) => {
+router.get('/conversations', authenticateToken, checkTrialAccess, async (req, res) => {
     try {
         const { data: messages, error } = await supabase
             .from('ai_conversations')
@@ -340,7 +363,7 @@ router.get('/conversations', authenticateToken, async (req, res) => {
     }
 });
 
-router.post('/conversations/send', authenticateToken, async (req, res) => {
+router.post('/conversations/send', authenticateToken, checkTrialAccess, async (req, res) => {
     try {
         const { content } = req.body;
 

@@ -2,9 +2,9 @@
 -- Run this in Supabase SQL Editor
 -- Transforms Onyx to autonomous outreach platform with 14-day free trial
 
--- Add trial fields
-ALTER TABLE users ADD COLUMN IF NOT EXISTS trial_start TIMESTAMP WITH TIME ZONE DEFAULT NOW();
-ALTER TABLE users ADD COLUMN IF NOT EXISTS trial_end TIMESTAMP WITH TIME ZONE DEFAULT NOW() + INTERVAL '14 days';
+-- Add trial fields (NULL by default, set when user selects plan)
+ALTER TABLE users ADD COLUMN IF NOT EXISTS trial_start TIMESTAMP WITH TIME ZONE;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS trial_end TIMESTAMP WITH TIME ZONE;
 
 -- Add subscription fields
 ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_status TEXT DEFAULT 'trial';
@@ -37,14 +37,12 @@ CREATE INDEX IF NOT EXISTS idx_users_trial_end ON users(trial_end);
 CREATE INDEX IF NOT EXISTS idx_users_stripe_subscription_id ON users(stripe_subscription_id);
 CREATE INDEX IF NOT EXISTS idx_users_onboarding_complete ON users(onboarding_complete);
 
--- Update existing users to have trial period (for testing)
+-- Update existing users (if any) to set default values
 UPDATE users 
 SET 
-    trial_start = NOW(),
-    trial_end = NOW() + INTERVAL '14 days',
     subscription_status = 'trial',
-    onboarding_complete = true
-WHERE trial_start IS NULL;
+    onboarding_complete = COALESCE(onboarding_complete, false)
+WHERE subscription_status IS NULL;
 
 -- Create function to calculate trial days remaining
 CREATE OR REPLACE FUNCTION calculate_trial_days_remaining(trial_end_date TIMESTAMP WITH TIME ZONE)

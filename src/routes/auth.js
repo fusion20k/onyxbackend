@@ -36,9 +36,6 @@ router.post('/signup', async (req, res) => {
             return res.status(400).json({ error: authError.message });
         }
 
-        const trialStart = new Date();
-        const trialEnd = new Date(trialStart.getTime() + 14 * 24 * 60 * 60 * 1000);
-
         const { error: userError } = await supabase
             .from('users')
             .insert({
@@ -48,8 +45,8 @@ router.post('/signup', async (req, res) => {
                 company: company,
                 display_name: name,
                 role: 'member',
-                trial_start: trialStart.toISOString(),
-                trial_end: trialEnd.toISOString(),
+                trial_start: null,
+                trial_end: null,
                 subscription_status: 'trial',
                 onboarding_complete: false
             });
@@ -83,8 +80,6 @@ router.post('/signup', async (req, res) => {
 
         await sendWelcomeEmail(email, name);
 
-        const trialDaysRemaining = Math.max(0, Math.ceil((trialEnd - new Date()) / (1000 * 60 * 60 * 24)));
-
         res.status(201).json({
             success: true,
             token: sessionData.session.access_token,
@@ -93,9 +88,9 @@ router.post('/signup', async (req, res) => {
                 email: email,
                 name: name,
                 company: company || null,
-                trial_start: trialStart.toISOString(),
-                trial_end: trialEnd.toISOString(),
-                trial_days_remaining: trialDaysRemaining,
+                trial_start: null,
+                trial_end: null,
+                trial_days_remaining: null,
                 subscription_status: 'trial',
                 subscription_plan: null,
                 onboarding_complete: false
@@ -158,9 +153,6 @@ router.post('/create-account', async (req, res) => {
             return res.status(400).json({ error: authError.message });
         }
 
-        const trialStart = new Date();
-        const trialEnd = new Date(trialStart.getTime() + 14 * 24 * 60 * 60 * 1000);
-
         const { error: userError } = await supabase
             .from('users')
             .insert({
@@ -169,8 +161,8 @@ router.post('/create-account', async (req, res) => {
                 name: name,
                 display_name: name,
                 role: 'member',
-                trial_start: trialStart.toISOString(),
-                trial_end: trialEnd.toISOString(),
+                trial_start: null,
+                trial_end: null,
                 subscription_status: 'trial',
                 onboarding_complete: false
             });
@@ -209,8 +201,6 @@ router.post('/create-account', async (req, res) => {
 
         await sendWelcomeEmail(email, name);
 
-        const trialDaysRemaining = Math.max(0, Math.ceil((trialEnd - new Date()) / (1000 * 60 * 60 * 24)));
-
         res.status(201).json({
             success: true,
             token: sessionData.session.access_token,
@@ -219,9 +209,9 @@ router.post('/create-account', async (req, res) => {
                 email: email,
                 name: name,
                 company: null,
-                trial_start: trialStart.toISOString(),
-                trial_end: trialEnd.toISOString(),
-                trial_days_remaining: trialDaysRemaining,
+                trial_start: null,
+                trial_end: null,
+                trial_days_remaining: null,
                 subscription_status: 'trial',
                 subscription_plan: null,
                 onboarding_complete: false
@@ -267,8 +257,11 @@ router.post('/login', async (req, res) => {
             .update({ last_login: new Date().toISOString() })
             .eq('id', data.user.id);
 
-        const trialEnd = new Date(userData.trial_end);
-        const trialDaysRemaining = Math.max(0, Math.ceil((trialEnd - new Date()) / (1000 * 60 * 60 * 24)));
+        let trialDaysRemaining = null;
+        if (userData.trial_end) {
+            const trialEnd = new Date(userData.trial_end);
+            trialDaysRemaining = Math.max(0, Math.ceil((trialEnd - new Date()) / (1000 * 60 * 60 * 24)));
+        }
 
         res.json({
             success: true,
@@ -376,8 +369,11 @@ router.get('/status', async (req, res) => {
             return res.json({ authenticated: false });
         }
 
-        const trialEnd = new Date(userData.trial_end);
-        const trialDaysRemaining = Math.max(0, Math.ceil((trialEnd - new Date()) / (1000 * 60 * 60 * 24)));
+        let trialDaysRemaining = null;
+        if (userData.trial_end) {
+            const trialEnd = new Date(userData.trial_end);
+            trialDaysRemaining = Math.max(0, Math.ceil((trialEnd - new Date()) / (1000 * 60 * 60 * 24)));
+        }
 
         res.json({
             authenticated: true,

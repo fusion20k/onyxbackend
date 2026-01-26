@@ -45,7 +45,27 @@ router.post('/create-checkout-session', authenticateToken, async (req, res) => {
             return res.status(500).json({ error: 'Price ID not configured for this plan' });
         }
 
-        let customerId = req.user.stripe_customer_id;
+        const { data: userData } = await supabase
+            .from('users')
+            .select('trial_start, trial_end, stripe_customer_id')
+            .eq('id', req.user.id)
+            .single();
+
+        if (!userData.trial_start) {
+            const trialStart = new Date();
+            const trialEnd = new Date(trialStart.getTime() + 14 * 24 * 60 * 60 * 1000);
+
+            await supabase
+                .from('users')
+                .update({
+                    trial_start: trialStart.toISOString(),
+                    trial_end: trialEnd.toISOString(),
+                    subscription_plan: plan
+                })
+                .eq('id', req.user.id);
+        }
+
+        let customerId = userData.stripe_customer_id || req.user.stripe_customer_id;
 
         if (!customerId) {
             const customer = await stripe.customers.create({
