@@ -24,7 +24,7 @@ router.get('/config', (req, res) => {
     });
 });
 
-router.post('/create-checkout-session', authenticateToken, async (req, res) => {
+const createCheckoutHandler = async (req, res) => {
     try {
         const { plan, price } = req.body;
 
@@ -110,7 +110,10 @@ router.post('/create-checkout-session', authenticateToken, async (req, res) => {
         console.error('Create checkout session error:', error);
         res.status(500).json({ error: 'Failed to create checkout session' });
     }
-});
+};
+
+router.post('/create-checkout-session', authenticateToken, createCheckoutHandler);
+router.post('/create-checkout', authenticateToken, createCheckoutHandler);
 
 router.post('/verify', authenticateToken, async (req, res) => {
     try {
