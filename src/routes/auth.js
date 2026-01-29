@@ -87,13 +87,12 @@ router.post('/signup', async (req, res) => {
                 id: authData.user.id,
                 email: email,
                 name: name,
+                display_name: name,
                 company: company || null,
-                trial_start: null,
-                trial_end: null,
-                trial_days_remaining: null,
+                onboarding_complete: false,
                 subscription_status: 'trial',
                 subscription_plan: null,
-                onboarding_complete: false
+                trial_days_remaining: null
             }
         });
     } catch (error) {
@@ -208,13 +207,12 @@ router.post('/create-account', async (req, res) => {
                 id: authData.user.id,
                 email: email,
                 name: name,
+                display_name: name,
                 company: null,
-                trial_start: null,
-                trial_end: null,
-                trial_days_remaining: null,
+                onboarding_complete: false,
                 subscription_status: 'trial',
                 subscription_plan: null,
-                onboarding_complete: false
+                trial_days_remaining: null
             }
         });
     } catch (error) {
@@ -257,10 +255,18 @@ router.post('/login', async (req, res) => {
             .update({ last_login: new Date().toISOString() })
             .eq('id', data.user.id);
 
+        let subscriptionStatus = userData.subscription_status || 'trial';
         let trialDaysRemaining = null;
+
         if (userData.trial_end) {
             const trialEnd = new Date(userData.trial_end);
-            trialDaysRemaining = Math.max(0, Math.ceil((trialEnd - new Date()) / (1000 * 60 * 60 * 24)));
+            const now = new Date();
+            const daysRemaining = Math.ceil((trialEnd - now) / (1000 * 60 * 60 * 24));
+            trialDaysRemaining = Math.max(0, daysRemaining);
+
+            if (daysRemaining <= 0 && subscriptionStatus === 'trial') {
+                subscriptionStatus = 'expired';
+            }
         }
 
         res.json({
@@ -270,13 +276,12 @@ router.post('/login', async (req, res) => {
                 id: userData.id,
                 email: userData.email,
                 name: userData.name || userData.display_name,
+                display_name: userData.display_name || userData.name,
                 company: userData.company,
-                trial_start: userData.trial_start,
-                trial_end: userData.trial_end,
-                trial_days_remaining: trialDaysRemaining,
-                subscription_status: userData.subscription_status,
+                onboarding_complete: userData.onboarding_complete || false,
+                subscription_status: subscriptionStatus,
                 subscription_plan: userData.subscription_plan,
-                onboarding_complete: userData.onboarding_complete
+                trial_days_remaining: trialDaysRemaining
             }
         });
     } catch (error) {
@@ -369,10 +374,18 @@ router.get('/status', async (req, res) => {
             return res.json({ authenticated: false });
         }
 
+        let subscriptionStatus = userData.subscription_status || 'trial';
         let trialDaysRemaining = null;
+
         if (userData.trial_end) {
             const trialEnd = new Date(userData.trial_end);
-            trialDaysRemaining = Math.max(0, Math.ceil((trialEnd - new Date()) / (1000 * 60 * 60 * 24)));
+            const now = new Date();
+            const daysRemaining = Math.ceil((trialEnd - now) / (1000 * 60 * 60 * 24));
+            trialDaysRemaining = Math.max(0, daysRemaining);
+
+            if (daysRemaining <= 0 && subscriptionStatus === 'trial') {
+                subscriptionStatus = 'expired';
+            }
         }
 
         res.json({
@@ -381,13 +394,12 @@ router.get('/status', async (req, res) => {
                 id: userData.id,
                 email: userData.email,
                 name: userData.name || userData.display_name,
+                display_name: userData.display_name || userData.name,
                 company: userData.company,
-                trial_start: userData.trial_start,
-                trial_end: userData.trial_end,
-                trial_days_remaining: trialDaysRemaining,
-                subscription_status: userData.subscription_status,
+                onboarding_complete: userData.onboarding_complete || false,
+                subscription_status: subscriptionStatus,
                 subscription_plan: userData.subscription_plan,
-                onboarding_complete: userData.onboarding_complete
+                trial_days_remaining: trialDaysRemaining
             }
         });
     } catch (error) {
